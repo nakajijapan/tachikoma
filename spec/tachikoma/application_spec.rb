@@ -111,6 +111,19 @@ YAML
     end
   end
 
+  context 'if strategy is `carthage`' do
+    before do
+      allow_any_instance_of(Tachikoma::Application).to receive(:load)
+      allow_any_instance_of(Tachikoma::Application).to receive(:fetch)
+      allow_any_instance_of(Tachikoma::Application).to receive(:pull_request)
+    end
+
+    it 'should be called `carthage` method' do
+      expect_any_instance_of(Tachikoma::Application).to receive(:carthage)
+      Tachikoma::Application.run 'carthage'
+    end
+  end
+
   describe '#bundler_parallel_option' do
     subject { described_class.new }
 
