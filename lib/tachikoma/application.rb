@@ -42,18 +42,28 @@ module Tachikoma
       @commiter_email = @configure['commiter_email']
       @github_account = @configure['github_account']
       @url = @configure['url']
+      @ssh = @configure['ssh']
       @type = @configure['type']
       @base_remote_branch = @configure['base_remote_branch']
-      @authorized_compare_url = authorized_compare_url_with_type(@url, @type, @github_token, @github_account)
-      @authorized_base_url = authorized_base_url_with_type(@url, @type, @github_token, @github_account)
+
+      if @ssh
+        @authorized_compare_url = @ssh
+        @authorized_base_url    = @ssh
+        @pull_request_url = repository_identity_from_ssh(@ssh)
+        @target_head = target_repository_user_from_ssh(@type, @ssh, @github_account)
+      else
+        @authorized_compare_url = authorized_compare_url_with_type(@url, @type, @github_token, @github_account)
+        @authorized_base_url = authorized_base_url_with_type(@url, @type, @github_token, @github_account)
+        @pull_request_url = repository_identity(@url)
+        @target_head = target_repository_user(@type, @url, @github_account)
+      end
+
       @timestamp_format = @configure['timestamp_format']
       @readable_time = Time.now.utc.strftime(@timestamp_format)
       @parallel_option = bundler_parallel_option(Bundler::VERSION, @configure['bundler_parallel_number'])
       @depth_option = git_clone_depth_option(@configure['git_clone_depth'])
       @bundler_restore_bundled_with = @configure['bundler_restore_bundled_with']
 
-      @target_head = target_repository_user(@type, @url, @github_account)
-      @pull_request_url = repository_identity(@url)
       @pull_request_body = @configure['pull_request_body']
       @pull_request_base = @configure['pull_request_base']
       @pull_request_head = "#{@target_head}:tachikoma/update-#{@readable_time}"
@@ -206,6 +216,21 @@ module Tachikoma
       end
     end
 
+    def carthage
+      Dir.chdir("#{Tachikoma.repos_path}/#{@build_for}") do
+        sh(*['git', 'config', 'user.name', @commiter_name])
+        sh(*['git', 'config', 'user.email', @commiter_email])
+        sh(*['git', 'checkout', '-b', "tachikoma/update-#{@readable_time}", @base_remote_branch])
+        sh(*%w(carthage bootstrap))
+        sh(*%w(carthage update))
+        sh(*['git', 'add', 'Cartfile.resolved'])
+        sh(*['git', 'commit', '-m', "Carthage update #{@readable_time}"]) do
+          # ignore exitstatus
+        end
+        sh(*['git', 'push', @authorized_compare_url, "tachikoma/update-#{@readable_time}"])
+      end
+    end
+
     def pull_request
       @client = Octokit::Client.new access_token: @github_token
       @client.create_pull_request(
@@ -260,8 +285,25 @@ module Tachikoma
       end
     end
 
+    def target_repository_user_from_ssh(type, ssh, github_account)
+      case type
+      when 'fork'
+        github_account
+      when 'shared'
+        ssh.split(':')[1].split('/').first
+      else
+        fail InvalidType, "Invalid type: #{type}"
+      end
+    end
+
     def repository_identity(url)
       project_name, user_name, _ = url.split('/').reverse
+      project_name_identity = strip_extension(project_name)
+      user_name + '/' + project_name_identity
+    end
+
+    def repository_identity_from_ssh(ssh)
+      user_name, project_name = ssh.split(':')[1].split('/')
       project_name_identity = strip_extension(project_name)
       user_name + '/' + project_name_identity
     end
